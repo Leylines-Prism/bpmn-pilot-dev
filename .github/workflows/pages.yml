@@ -1,0 +1,92 @@
+# Development page of BPMN-Pilot: builds the main branch of the source repository and publishes it
+# on GitHub Pages, on its own origin, apart from the stable page.
+#
+# It runs every 30 minutes and only rebuilds when main has changed. "Run workflow" (Actions tab)
+# publishes right away. No token: the source repository is public.
+#
+# Prerequisite: Settings > Pages > Source set to "GitHub Actions", with the custom domain.
+
+name: Dev page
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: Leylines-Prism/bpmn-pilot
+  SITE_URL: https://dev.bpmn.leylines.fr
+  STABLE_URL: https://bpmn.leylines.fr/
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.main.outputs.sha }}
+      build: ${{ steps.main.outputs.build }}
+    steps:
+      - id: main
+        run: |
+          sha=$(git ls-remote "https://github.com/$SOURCE_REPO" refs/heads/main | cut -f1)
+          [ -n "$sha" ] || { echo "main not found"; exit 1; }
+          live=$(curl -fsS "$SITE_URL/build-sha.txt" 2>/dev/null || true)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ "$sha" = "$live" ] && [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Already published: $sha"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ needs.check.outputs.sha }}
+          # Full history and tags: the displayed version comes from git describe.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build main as the development page
+        run: npm ci && npm run build:online
+        env:
+          SITE_CHANNEL: dev
+          BASE_PATH: /
+          SITE_URL: ${{ env.SITE_URL }}
+          VITE_OTHER_SITE_URL: ${{ env.STABLE_URL }}
+          VITE_SITE_HOST: ${{ vars.VITE_SITE_HOST || 'GitHub Pages' }}
+          VITE_HOST_LEGAL: ${{ vars.VITE_HOST_LEGAL }}
+          VITE_FEEDBACK_URL: ${{ vars.VITE_FEEDBACK_URL }}
+          CONTACT_URL: ${{ vars.VITE_CONTACT_URL }}
+          FEEDBACK_EMAIL: ${{ secrets.FEEDBACK_EMAIL }}
+      - run: echo "${{ needs.check.outputs.sha }}" > dist-online/build-sha.txt
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist-online
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
