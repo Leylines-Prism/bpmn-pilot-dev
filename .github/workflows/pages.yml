@@ -1,16 +1,22 @@
 # Development page of BPMN-Pilot: builds the main branch of the source repository and publishes it
 # on GitHub Pages, on its own origin, apart from the stable page.
 #
-# It runs every 30 minutes and only rebuilds when main has changed. "Run workflow" (Actions tab)
-# publishes right away. No token: the source repository is public.
+# The source repository sends a repository_dispatch event (type main-updated) after each push to
+# main, which rebuilds right away. A schedule every 30 minutes is kept as a fallback and only
+# rebuilds when main has changed: GitHub runs scheduled workflows on a best-effort basis and can
+# drop them, so it must not be the only trigger. "Run workflow" (Actions tab) publishes right away.
+# No token here: the source repository is public.
 #
 # Prerequisite: Settings > Pages > Source set to "GitHub Actions", with the custom domain.
 
 name: Dev page
 
 on:
+  repository_dispatch:
+    types: [main-updated]
   schedule:
-    - cron: '*/30 * * * *'
+    # Off the hour and the half hour, where GitHub delays or drops the most scheduled runs.
+    - cron: '17,47 * * * *'
   workflow_dispatch:
 
 permissions:
